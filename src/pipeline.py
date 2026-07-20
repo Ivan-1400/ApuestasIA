@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import datetime
 
-from src.data import espn_client, football_client, mlb_client, store
+from src.data import espn_client, espn_odds_client, football_client, mlb_client, store
 from src.models import mlb_model, soccer_poisson
 from src.models.parlay import Pick, best_pick_for_mlb, best_pick_for_soccer, check_pick_hit
+from src.odds import manual_odds
 
 DEFAULT_MLB_LEAGUE_AVG_RUNS = 4.3  # promedio histórico aproximado de carreras por equipo/partido
 DEFAULT_SOCCER_LEAGUE_AVG_GOALS = 1.35  # promedio histórico aproximado de ligas top europeas
@@ -15,6 +16,50 @@ DEFAULT_SOCCER_LEAGUE_AVG_GOALS = 1.35  # promedio histórico aproximado de liga
 # respuesta, así que build_soccer_predictions puede elegir uno u otro sin ramas especiales.
 SOCCER_CLIENTS = {"football_data": football_client, "espn": espn_client}
 
+# Para partidos que no vienen de ESPN (football-data.org), hace falta el slug de ESPN
+# equivalente para poder buscar sus cuotas por nombre de equipo.
+ESPN_SOCCER_SLUGS = {
+    "PL": "eng.1",
+    "PD": "esp.1",
+    "SA": "ita.1",
+    "BL1": "ger.1",
+    "CL": "uefa.champions",
+}
+
+
+def _attach_market_odds(result: dict, pick, sport_path: str, event_id: str | None) -> None:
+    """Agrega la cuota real de mercado (DraftKings vía ESPN) al resultado y compara la pick
+    del modelo contra ella. Best-effort: sin cuota publicada o cualquier error de red se
+    ignora en silencio — no es un partido con problema, simplemente no hay nada que comparar."""
+    result["market_provider"] = None
+    result["market_probability"] = None
+    result["market_comparison"] = None
+    if not event_id:
+        return
+    try:
+        odds = espn_odds_client.get_odds_by_event(sport_path, str(event_id))
+    except Exception:
+        return
+    if not odds:
+        return
+
+    if pick.market in ("over", "under"):
+        market_moneyline = odds.get("over_odds" if pick.market == "over" else "under_odds")
+    else:
+        market_moneyline = {
+            "home_win": odds.get("home_moneyline"),
+            "away_win": odds.get("away_moneyline"),
+            "draw": odds.get("draw_moneyline"),
+        }.get(pick.market)
+
+    if market_moneyline is None:
+        return
+
+    market_probability = manual_odds.implied_probability_american(market_moneyline)
+    result["market_provider"] = odds.get("provider")
+    result["market_probability"] = market_probability
+    result["market_comparison"] = manual_odds.compare_to_market(pick.probability, market_probability)
+
 
 def build_mlb_predictions(date: str | None = None) -> list[dict]:
     date = date or datetime.date.today().isoformat()
@@ -22,6 +67,11 @@ def build_mlb_predictions(date: str | None = None) -> list[dict]:
     session = store.get_session()
     try:
         games = mlb_client.get_schedule(date, hydrate_probable_pitcher=True)
+
+        try:
+            espn_events = espn_odds_client.get_scoreboard_events("baseball/mlb", date)
+        except Exception:
+            espn_events = []
 
         team_ids = {g["teams"]["home"]["team"]["id"] for g in games} | {
             g["teams"]["away"]["team"]["id"] for g in games
@@ -145,6 +195,9 @@ def build_mlb_predictions(date: str | None = None) -> list[dict]:
                 ),
             )
 
+            espn_event_id = espn_odds_client.find_event_id(espn_events, home["name"], away["name"])
+            _attach_market_odds(result, pick, "baseball/mlb", espn_event_id)
+
             results.append(result)
         return results
     finally:
@@ -163,6 +216,20 @@ def build_soccer_predictions(
     session = store.get_session()
     try:
         fixtures = client.get_fixtures(competition_code, date)
+
+        # Cuotas: si la liga ya viene de ESPN, cada fixture trae su propio ID de ESPN, no hace
+        # falta buscar nada. Si viene de football-data.org, hay que ubicar el evento equivalente
+        # en ESPN por nombre de equipo (mismo mecanismo que en build_mlb_predictions).
+        espn_sport_path = None
+        espn_events = []
+        if source == "espn":
+            espn_sport_path = f"soccer/{competition_code}"
+        elif competition_code in ESPN_SOCCER_SLUGS:
+            espn_sport_path = f"soccer/{ESPN_SOCCER_SLUGS[competition_code]}"
+            try:
+                espn_events = espn_odds_client.get_scoreboard_events(espn_sport_path, date)
+            except Exception:
+                espn_events = []
 
         team_ids = {f[side]["id"] for f in fixtures for side in ("homeTeam", "awayTeam")}
 
@@ -272,6 +339,16 @@ def build_soccer_predictions(
                     probability=pick.probability,
                 ),
             )
+
+            if espn_sport_path:
+                event_id = f["id"] if source == "espn" else espn_odds_client.find_event_id(
+                    espn_events, home["name"], away["name"]
+                )
+                _attach_market_odds(result, pick, espn_sport_path, event_id)
+            else:
+                result["market_provider"] = None
+                result["market_probability"] = None
+                result["market_comparison"] = None
 
             results.append(result)
         return results

@@ -182,6 +182,7 @@ div[class*="st-key-parlay_"] {
 }
 .ai-callout-positive { background: rgba(56, 161, 105, 0.10); border: 1px solid rgba(56, 161, 105, 0.3); }
 .ai-callout-neutral { background: rgba(160, 174, 192, 0.12); border: 1px solid rgba(160, 174, 192, 0.35); }
+.ai-callout-info { background: rgba(43, 108, 176, 0.10); border: 1px solid rgba(43, 108, 176, 0.3); }
 .ai-callout-title { font-weight: 700; margin-bottom: 0.2rem; }
 </style>
 """
@@ -251,6 +252,43 @@ def render_favorite_box(entries: list[tuple[str, float]]) -> str:
         f'<div class="ai-team-highlight">{favorite_label}</div>'
         f"<div>{detail}</div>"
         "</div>"
+    )
+
+
+PANORAMA_CONTENT = {
+    "coincide": (
+        "🎯",
+        "PANORAMA · OPORTUNIDAD FUERTE",
+        "ai-callout-positive",
+        "El sistema coincide con {provider}. Acá pisa firme.",
+    ),
+    "mas_confiado": (
+        "📈",
+        "PANORAMA · MODELO MÁS CONFIADO",
+        "ai-callout-info",
+        "El modelo le da más probabilidad que {provider} a este resultado.",
+    ),
+    "menos_confiado": (
+        "⚠️",
+        "PANORAMA · MODELO MÁS CAUTELOSO",
+        "ai-callout-neutral",
+        "El modelo le da menos probabilidad que {provider} a este resultado.",
+    ),
+}
+
+
+def render_panorama(result: dict) -> str | None:
+    """Compara la pick del modelo contra la cuota real de mercado (DraftKings vía ESPN) y
+    devuelve el callout 'Panorama' — o None si todavía no hay cuota publicada para comparar."""
+    comparison = result.get("market_comparison")
+    if not comparison:
+        return None
+    icon, title, cls, template = PANORAMA_CONTENT[comparison]
+    provider = result.get("market_provider") or "el mercado"
+    return (
+        f'<div class="ai-callout {cls}">'
+        f'<div class="ai-callout-title">{icon} {title}</div>'
+        f"{template.format(provider=provider)}</div>"
     )
 
 
@@ -395,6 +433,10 @@ if sport == "MLB":
                 st.markdown(render_prob_bar(entries), unsafe_allow_html=True)
                 st.markdown(render_favorite_box(entries), unsafe_allow_html=True)
 
+                panorama = render_panorama(p)
+                if panorama:
+                    st.markdown(panorama, unsafe_allow_html=True)
+
                 stat_rows = [
                     (f"Carreras esperadas — {p['home_team']}", f"{p['home_runs_xg']:.2f}"),
                     (f"Carreras esperadas — {p['away_team']}", f"{p['away_runs_xg']:.2f}"),
@@ -471,6 +513,10 @@ else:
             ]
             st.markdown(render_prob_bar(entries), unsafe_allow_html=True)
             st.markdown(render_favorite_box(entries), unsafe_allow_html=True)
+
+            panorama = render_panorama(p)
+            if panorama:
+                st.markdown(panorama, unsafe_allow_html=True)
 
             stat_rows = [
                 (f"Goles esperados — {p['home_team']}", f"{p['home_xg']:.2f}"),
