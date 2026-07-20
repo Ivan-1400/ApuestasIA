@@ -1,3 +1,6 @@
+import os
+import tempfile
+
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -57,3 +60,35 @@ def test_save_prediction_once_allows_different_fixtures(session):
         ),
     )
     assert session.query(store.Prediction).count() == 2
+
+
+def test_resolve_writable_db_path_returns_original_when_writable(tmp_path):
+    db_path = tmp_path / "apuestas.sqlite"
+    assert store._resolve_writable_db_path(str(db_path)) == str(db_path)
+
+
+def test_resolve_writable_db_path_falls_back_when_readonly(tmp_path, monkeypatch):
+    db_path = tmp_path / "apuestas.sqlite"
+    db_path.write_bytes(b"contenido de prueba")
+
+    real_open = open
+
+    def fake_open(path, *args, **kwargs):
+        if os.path.basename(str(path)) == ".write_test":
+            raise OSError("readonly filesystem")
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.open", fake_open)
+
+    fallback_path = os.path.join(tempfile.gettempdir(), "apuestasia_apuestas.sqlite")
+    if os.path.exists(fallback_path):
+        os.remove(fallback_path)
+
+    result = store._resolve_writable_db_path(str(db_path))
+
+    assert result == fallback_path
+    assert os.path.exists(fallback_path)
+    with open(fallback_path, "rb") as f:
+        assert f.read() == b"contenido de prueba"
+
+    os.remove(fallback_path)

@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import datetime
 import os
+import shutil
+import tempfile
 
 from sqlalchemy import (
     Column,
@@ -18,6 +20,29 @@ Base = declarative_base()
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "data", "apuestas.sqlite")
 DB_PATH = os.path.abspath(DB_PATH)
+
+
+def _resolve_writable_db_path(path: str) -> str:
+    """Streamlit Community Cloud monta el checkout del repo como solo lectura, así que
+    escribir en `data/apuestas.sqlite` ahí falla con "attempt to write a readonly database".
+    Localmente y en el workflow de GitHub Actions el directorio sí es escribible.
+
+    Si no se puede escribir en `path`, se copia (si existe) a un directorio temporal
+    escribible y se usa esa copia para la sesión — los cambios no vuelven al repo desde acá;
+    de mantener el historial persistente entre reinicios se encarga el cron diario de
+    GitHub Actions, que sí corre en un entorno escribible."""
+    directory = os.path.dirname(path)
+    probe = os.path.join(directory, ".write_test")
+    try:
+        with open(probe, "w") as f:
+            f.write("x")
+        os.remove(probe)
+        return path
+    except OSError:
+        fallback_path = os.path.join(tempfile.gettempdir(), "apuestasia_apuestas.sqlite")
+        if os.path.exists(path) and not os.path.exists(fallback_path):
+            shutil.copy2(path, fallback_path)
+        return fallback_path
 
 
 class Fixture(Base):
@@ -80,7 +105,8 @@ _SessionLocal = None
 def init_db() -> None:
     global _engine, _SessionLocal
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    _engine = create_engine(f"sqlite:///{DB_PATH}")
+    effective_path = _resolve_writable_db_path(DB_PATH)
+    _engine = create_engine(f"sqlite:///{effective_path}")
     Base.metadata.create_all(_engine)
     _SessionLocal = sessionmaker(bind=_engine)
 
@@ -152,4 +178,4 @@ def get_fixtures_by_date(session: Session, sport: str, date: str) -> list[Fixtur
 
 if __name__ == "__main__":
     init_db()
-    print(f"Base de datos inicializada en {DB_PATH}")
+    print(f"Base de datos inicializada en {_resolve_writable_db_path(DB_PATH)}")
