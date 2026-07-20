@@ -21,6 +21,7 @@ from src.models.parlay import (
     best_pick_for_soccer,
     check_pick_hit,
     most_likely_parlays,
+    parlay_status,
 )
 from src.pipeline import build_mlb_predictions, build_soccer_predictions
 
@@ -268,9 +269,18 @@ def render_result_badge(hit: bool, outcome_label: str) -> str:
     return f'<span class="ai-value-badge {cls}">{icon} {verdict} — predijo: {outcome_label}</span>'
 
 
+PARLAY_STATUS_BADGE = {
+    "ganado": '<span class="ai-value-badge ai-result-hit">🏆 GANADO</span>',
+    "perdido": '<span class="ai-value-badge ai-result-miss">💔 PERDIDO</span>',
+    "en_curso": '<span class="ai-value-badge ai-value-negative">⏳ EN CURSO</span>',
+}
+
+
 def render_parlays(picks: list) -> None:
     """Muestra los parleys (combinadas) con mayor probabilidad de ganar, armados con la pick
-    más segura de cada partido. Requiere al menos 2 partidos para tener algo que combinar."""
+    más segura de cada partido — con las stats que sustentan cada pata (carreras/goles
+    esperados, pitchers) y, si el partido ya terminó, el resultado real y si ganó o perdió,
+    tanto por pata como el parley completo. Requiere al menos 2 partidos para combinar."""
     if len(picks) < 2:
         return
 
@@ -280,16 +290,23 @@ def render_parlays(picks: list) -> None:
         "independientes entre sí — una simplificación, no una garantía)."
     )
     for i, parlay in enumerate(most_likely_parlays(picks, min_legs=2, max_legs=4, top_n=5)):
-        legs_text = " + ".join(
-            f"**{leg.outcome_label}** ({leg.match_label})" for leg in parlay["legs"]
-        )
+        status = parlay_status(parlay["legs"])
         with st.container(border=True, key=f"parlay_{i}"):
             st.markdown(
                 f'<span class="ai-value-badge ai-value-positive">'
-                f'{parlay["num_legs"]} patas — {parlay["combined_probability"]:.1%} de ganar todo</span>',
+                f'{parlay["num_legs"]} patas — {parlay["combined_probability"]:.1%} de ganar todo</span>'
+                f"{PARLAY_STATUS_BADGE[status]}",
                 unsafe_allow_html=True,
             )
-            st.write(legs_text)
+            for leg in parlay["legs"]:
+                leg_line = f"**{leg.outcome_label}** ({leg.match_label})"
+                if leg.detail:
+                    leg_line += f"  \n{leg.detail}"
+                if leg.is_final and leg.home_score is not None:
+                    hit = check_pick_hit(leg, leg.home_score, leg.away_score)
+                    icon = "✅" if hit else "❌"
+                    leg_line += f"  \n{icon} Resultado: {leg.home_score}-{leg.away_score}"
+                st.write(leg_line)
 
 
 st.set_page_config(page_title="ApuestasIA", layout="centered")

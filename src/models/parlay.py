@@ -1,5 +1,5 @@
 """Arma parleys (combinadas) a partir de la pick más probable de cada partido, y permite
-verificar si esa pick acertó una vez que el partido terminó.
+verificar si esa pick — y el parley entero — acertó una vez que los partidos terminan.
 
 Asume independencia entre partidos: la probabilidad combinada es el producto de las
 probabilidades individuales. Es una simplificación — en la realidad puede haber correlación
@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from itertools import combinations
 
 Market = str  # 'home_win' | 'away_win' | 'draw' | 'over' | 'under'
+ParlayStatus = str  # 'ganado' | 'perdido' | 'en_curso'
 
 
 @dataclass(frozen=True)
@@ -21,6 +22,10 @@ class Pick:
     probability: float
     market: Market
     line: float | None = None  # solo para 'over'/'under'
+    detail: str = ""  # resumen de las stats que dieron pie a la pick (carreras/goles, pitchers)
+    is_final: bool = False
+    home_score: int | None = None
+    away_score: int | None = None
 
 
 def best_pick_for_mlb(prediction: dict) -> Pick:
@@ -34,7 +39,29 @@ def best_pick_for_mlb(prediction: dict) -> Pick:
     ]
     outcome_label, probability, market, pick_line = max(options, key=lambda o: o[1])
     match_label = f"{prediction['away_team']} @ {prediction['home_team']}"
-    return Pick(match_label, outcome_label, probability, market, pick_line)
+
+    detail_parts = [f"{prediction['total_runs_xg']:.1f} carreras esperadas"]
+    pitcher_bits = []
+    if prediction.get("away_pitcher_name"):
+        era = prediction.get("away_pitcher_era")
+        pitcher_bits.append(f"{prediction['away_pitcher_name']}" + (f" (ERA {era:.2f})" if era is not None else ""))
+    if prediction.get("home_pitcher_name"):
+        era = prediction.get("home_pitcher_era")
+        pitcher_bits.append(f"{prediction['home_pitcher_name']}" + (f" (ERA {era:.2f})" if era is not None else ""))
+    if pitcher_bits:
+        detail_parts.append(" vs ".join(pitcher_bits))
+
+    return Pick(
+        match_label,
+        outcome_label,
+        probability,
+        market,
+        pick_line,
+        detail=" · ".join(detail_parts),
+        is_final=bool(prediction.get("is_final")),
+        home_score=prediction.get("home_score"),
+        away_score=prediction.get("away_score"),
+    )
 
 
 def best_pick_for_soccer(prediction: dict) -> Pick:
@@ -48,7 +75,19 @@ def best_pick_for_soccer(prediction: dict) -> Pick:
     ]
     outcome_label, probability, market, pick_line = max(options, key=lambda o: o[1])
     match_label = f"{prediction['home_team']} vs {prediction['away_team']}"
-    return Pick(match_label, outcome_label, probability, market, pick_line)
+    detail = f"{prediction['home_xg']:.1f}-{prediction['away_xg']:.1f} goles esperados"
+
+    return Pick(
+        match_label,
+        outcome_label,
+        probability,
+        market,
+        pick_line,
+        detail=detail,
+        is_final=bool(prediction.get("is_final")),
+        home_score=prediction.get("home_score"),
+        away_score=prediction.get("away_score"),
+    )
 
 
 def check_pick_hit(pick: Pick, home_score: int, away_score: int) -> bool:
@@ -65,6 +104,19 @@ def check_pick_hit(pick: Pick, home_score: int, away_score: int) -> bool:
     if pick.market == "under":
         return total < pick.line
     raise ValueError(f"Mercado desconocido: {pick.market}")
+
+
+def parlay_status(legs: list[Pick]) -> ParlayStatus:
+    """Estado del parley según cómo terminaron sus patas — igual que liquida una casa de
+    apuestas real: si UNA pata ya perdió, el parley está perdido aunque otras sigan sin jugarse."""
+    any_pending = False
+    for leg in legs:
+        if leg.is_final and leg.home_score is not None and leg.away_score is not None:
+            if not check_pick_hit(leg, leg.home_score, leg.away_score):
+                return "perdido"
+        else:
+            any_pending = True
+    return "en_curso" if any_pending else "ganado"
 
 
 def most_likely_parlays(

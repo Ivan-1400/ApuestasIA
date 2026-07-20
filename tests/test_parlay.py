@@ -4,6 +4,7 @@ from src.models.parlay import (
     best_pick_for_soccer,
     check_pick_hit,
     most_likely_parlays,
+    parlay_status,
 )
 
 
@@ -46,12 +47,25 @@ def test_best_pick_for_mlb_picks_highest_probability_option():
         "p_over": 0.7,
         "p_under": 0.3,
         "line": 8.5,
+        "total_runs_xg": 9.1,
+        "home_pitcher_name": "Gerrit Cole",
+        "home_pitcher_era": 3.1,
+        "away_pitcher_name": "Chris Sale",
+        "away_pitcher_era": 2.8,
+        "is_final": True,
+        "home_score": 6,
+        "away_score": 4,
     }
     pick = best_pick_for_mlb(prediction)
     assert pick.outcome_label == "Más de 8.5 carreras"
     assert pick.probability == 0.7
     assert pick.market == "over"
     assert pick.line == 8.5
+    assert "9.1 carreras esperadas" in pick.detail
+    assert "Gerrit Cole" in pick.detail and "Chris Sale" in pick.detail
+    assert pick.is_final is True
+    assert pick.home_score == 6
+    assert pick.away_score == 4
 
 
 def test_best_pick_for_soccer_picks_highest_probability_option():
@@ -63,12 +77,16 @@ def test_best_pick_for_soccer_picks_highest_probability_option():
         "p_away_win": 0.25,
         "p_over_2_5": 0.4,
         "p_under_2_5": 0.6,
+        "home_xg": 1.2,
+        "away_xg": 0.9,
     }
     pick = best_pick_for_soccer(prediction)
     assert pick.outcome_label == "Under 2.5 goles"
     assert pick.probability == 0.6
     assert pick.market == "under"
     assert pick.line == 2.5
+    assert pick.detail == "1.2-0.9 goles esperados"
+    assert pick.is_final is False
 
 
 def test_check_pick_hit_home_win():
@@ -96,3 +114,28 @@ def test_check_pick_hit_over_under():
     assert check_pick_hit(over_pick, home_score=1, away_score=1) is False
     assert check_pick_hit(under_pick, home_score=1, away_score=1) is True
     assert check_pick_hit(under_pick, home_score=2, away_score=1) is False
+
+
+def test_parlay_status_won_when_all_legs_final_and_hit():
+    legs = [
+        Pick("A@B", "B", 0.6, "home_win", is_final=True, home_score=5, away_score=3),
+        Pick("C@D", "C", 0.6, "home_win", is_final=True, home_score=2, away_score=1),
+    ]
+    assert parlay_status(legs) == "ganado"
+
+
+def test_parlay_status_lost_if_any_finished_leg_missed():
+    legs = [
+        Pick("A@B", "B", 0.6, "home_win", is_final=True, home_score=5, away_score=3),
+        Pick("C@D", "C", 0.6, "home_win", is_final=True, home_score=1, away_score=2),  # falló
+        Pick("E@F", "E", 0.6, "home_win", is_final=False),  # todavía sin jugar
+    ]
+    assert parlay_status(legs) == "perdido"
+
+
+def test_parlay_status_pending_when_no_misses_but_some_not_final():
+    legs = [
+        Pick("A@B", "B", 0.6, "home_win", is_final=True, home_score=5, away_score=3),
+        Pick("C@D", "C", 0.6, "home_win", is_final=False),
+    ]
+    assert parlay_status(legs) == "en_curso"
