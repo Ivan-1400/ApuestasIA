@@ -4,6 +4,7 @@ from __future__ import annotations
 import datetime
 import os
 import shutil
+import sqlite3
 import tempfile
 
 from sqlalchemy import (
@@ -27,11 +28,11 @@ def _resolve_writable_db_path(path: str) -> str:
     escribir en `data/apuestas.sqlite` ahí falla con "attempt to write a readonly database".
     Localmente y en el workflow de GitHub Actions el directorio sí es escribible.
 
-    Importante: hay que probar el archivo en sí, no solo si el directorio admite archivos
-    nuevos — en el checkout de git de Cloud el directorio puede permitir crear archivos
-    nuevos (capa de escritura del contenedor) mientras que `apuestas.sqlite`, al venir del
-    checkout, queda en la capa de solo lectura. Probar con un archivo separado (`.write_test`)
-    daba un falso positivo por esto.
+    Importante: la prueba tiene que ser una escritura real de SQLite (adquirir el lock de
+    escritura), no un `open()` de Python — SQLite necesita bloqueos de archivo que a veces
+    fallan en filesystems/overlays restrictivos aunque un `open()` simple hubiera funcionado
+    (eso pasó acá: la primera versión de este fix probaba con `open()` y no detectaba el
+    problema real en Streamlit Cloud).
 
     Si no se puede escribir en `path`, se copia (si existe) a un directorio temporal
     escribible y se usa esa copia para la sesión — los cambios no vuelven al repo desde acá;
@@ -39,14 +40,15 @@ def _resolve_writable_db_path(path: str) -> str:
     GitHub Actions, que sí corre en un entorno escribible."""
     directory = os.path.dirname(path)
     os.makedirs(directory, exist_ok=True)
-    existed_before = os.path.exists(path)
     try:
-        with open(path, "ab"):  # append: no trunca ni pierde datos si ya existía
-            pass
-        if not existed_before:
-            os.remove(path)  # no dejar un archivo vacío de sobra si no existía todavía
+        conn = sqlite3.connect(path, timeout=2)
+        try:
+            conn.execute("BEGIN IMMEDIATE")  # fuerza a adquirir el lock de escritura ya
+            conn.execute("ROLLBACK")
+        finally:
+            conn.close()
         return path
-    except OSError:
+    except sqlite3.OperationalError:
         fallback_path = os.path.join(tempfile.gettempdir(), "apuestasia_apuestas.sqlite")
         if os.path.exists(path) and not os.path.exists(fallback_path):
             shutil.copy2(path, fallback_path)

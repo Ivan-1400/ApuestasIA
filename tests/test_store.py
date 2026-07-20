@@ -1,4 +1,5 @@
 import os
+import sqlite3
 import tempfile
 
 import pytest
@@ -67,21 +68,23 @@ def test_resolve_writable_db_path_returns_original_when_writable(tmp_path):
     assert store._resolve_writable_db_path(str(db_path)) == str(db_path)
 
 
-def test_resolve_writable_db_path_falls_back_when_file_itself_is_readonly(tmp_path, monkeypatch):
-    """Simula el caso real de Streamlit Cloud: el directorio permite crear archivos nuevos
-    (capa de escritura del contenedor) pero el archivo `apuestas.sqlite` del checkout de git
-    está en la capa de solo lectura — probar con un archivo separado daba falso positivo."""
+def test_resolve_writable_db_path_falls_back_on_sqlite_operational_error(tmp_path, monkeypatch):
+    """No depende de permisos reales del SO — en Windows, marcar un archivo de solo lectura
+    con os.chmod no siempre bloquea la escritura para el dueño del archivo, así que un test
+    basado en permisos del filesystem no es confiable multiplataforma. En cambio, simula
+    directamente el error real que tira SQLite en Streamlit Cloud
+    (`sqlite3.OperationalError: attempt to write a readonly database`)."""
     db_path = tmp_path / "apuestas.sqlite"
     db_path.write_bytes(b"contenido de prueba")
 
-    real_open = open
+    real_connect = sqlite3.connect
 
-    def fake_open(path, mode="r", *args, **kwargs):
-        if os.path.abspath(str(path)) == os.path.abspath(str(db_path)) and "a" in mode:
-            raise OSError("readonly filesystem")
-        return real_open(path, mode, *args, **kwargs)
+    def fake_connect(path, *args, **kwargs):
+        if os.path.abspath(str(path)) == os.path.abspath(str(db_path)):
+            raise sqlite3.OperationalError("attempt to write a readonly database")
+        return real_connect(path, *args, **kwargs)
 
-    monkeypatch.setattr("builtins.open", fake_open)
+    monkeypatch.setattr(store.sqlite3, "connect", fake_connect)
 
     fallback_path = os.path.join(tempfile.gettempdir(), "apuestasia_apuestas.sqlite")
     if os.path.exists(fallback_path):
