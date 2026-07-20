@@ -27,16 +27,24 @@ def _resolve_writable_db_path(path: str) -> str:
     escribir en `data/apuestas.sqlite` ahí falla con "attempt to write a readonly database".
     Localmente y en el workflow de GitHub Actions el directorio sí es escribible.
 
+    Importante: hay que probar el archivo en sí, no solo si el directorio admite archivos
+    nuevos — en el checkout de git de Cloud el directorio puede permitir crear archivos
+    nuevos (capa de escritura del contenedor) mientras que `apuestas.sqlite`, al venir del
+    checkout, queda en la capa de solo lectura. Probar con un archivo separado (`.write_test`)
+    daba un falso positivo por esto.
+
     Si no se puede escribir en `path`, se copia (si existe) a un directorio temporal
     escribible y se usa esa copia para la sesión — los cambios no vuelven al repo desde acá;
     de mantener el historial persistente entre reinicios se encarga el cron diario de
     GitHub Actions, que sí corre en un entorno escribible."""
     directory = os.path.dirname(path)
-    probe = os.path.join(directory, ".write_test")
+    os.makedirs(directory, exist_ok=True)
+    existed_before = os.path.exists(path)
     try:
-        with open(probe, "w") as f:
-            f.write("x")
-        os.remove(probe)
+        with open(path, "ab"):  # append: no trunca ni pierde datos si ya existía
+            pass
+        if not existed_before:
+            os.remove(path)  # no dejar un archivo vacío de sobra si no existía todavía
         return path
     except OSError:
         fallback_path = os.path.join(tempfile.gettempdir(), "apuestasia_apuestas.sqlite")

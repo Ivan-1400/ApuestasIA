@@ -67,16 +67,19 @@ def test_resolve_writable_db_path_returns_original_when_writable(tmp_path):
     assert store._resolve_writable_db_path(str(db_path)) == str(db_path)
 
 
-def test_resolve_writable_db_path_falls_back_when_readonly(tmp_path, monkeypatch):
+def test_resolve_writable_db_path_falls_back_when_file_itself_is_readonly(tmp_path, monkeypatch):
+    """Simula el caso real de Streamlit Cloud: el directorio permite crear archivos nuevos
+    (capa de escritura del contenedor) pero el archivo `apuestas.sqlite` del checkout de git
+    está en la capa de solo lectura — probar con un archivo separado daba falso positivo."""
     db_path = tmp_path / "apuestas.sqlite"
     db_path.write_bytes(b"contenido de prueba")
 
     real_open = open
 
-    def fake_open(path, *args, **kwargs):
-        if os.path.basename(str(path)) == ".write_test":
+    def fake_open(path, mode="r", *args, **kwargs):
+        if os.path.abspath(str(path)) == os.path.abspath(str(db_path)) and "a" in mode:
             raise OSError("readonly filesystem")
-        return real_open(path, *args, **kwargs)
+        return real_open(path, mode, *args, **kwargs)
 
     monkeypatch.setattr("builtins.open", fake_open)
 
