@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import datetime
 
-from src.data import football_client, mlb_client, store
+from src.data import espn_client, football_client, mlb_client, store
 from src.models import mlb_model, soccer_poisson
 from src.models.parlay import Pick, best_pick_for_mlb, best_pick_for_soccer, check_pick_hit
 
 DEFAULT_MLB_LEAGUE_AVG_RUNS = 4.3  # promedio histórico aproximado de carreras por equipo/partido
 DEFAULT_SOCCER_LEAGUE_AVG_GOALS = 1.35  # promedio histórico aproximado de ligas top europeas
+
+# Ambos clientes exponen get_fixtures(code, date) / get_standings(code) con el mismo shape de
+# respuesta, así que build_soccer_predictions puede elegir uno u otro sin ramas especiales.
+SOCCER_CLIENTS = {"football_data": football_client, "espn": espn_client}
 
 
 def build_mlb_predictions(date: str | None = None) -> list[dict]:
@@ -148,12 +152,17 @@ def build_mlb_predictions(date: str | None = None) -> list[dict]:
 
 
 def build_soccer_predictions(
-    competition_code: str, league_name: str, season: int, date: str | None = None
+    competition_code: str,
+    league_name: str,
+    season: int,
+    date: str | None = None,
+    source: str = "football_data",
 ) -> list[dict]:
     date = date or datetime.date.today().isoformat()
+    client = SOCCER_CLIENTS[source]
     session = store.get_session()
     try:
-        fixtures = football_client.get_fixtures(competition_code, date)
+        fixtures = client.get_fixtures(competition_code, date)
 
         team_ids = {f[side]["id"] for f in fixtures for side in ("homeTeam", "awayTeam")}
 
@@ -171,7 +180,7 @@ def build_soccer_predictions(
         if missing_team_ids:
             # La tabla de posiciones trae goalsFor/goalsAgainst/playedGames de TODOS los
             # equipos en un solo request, así que se cachean todos aunque solo falten algunos.
-            for row in football_client.get_standings(competition_code):
+            for row in client.get_standings(competition_code):
                 team_id = row["team"]["id"]
                 games_played = row["playedGames"] or 1
                 goals_for = row["goalsFor"] / games_played

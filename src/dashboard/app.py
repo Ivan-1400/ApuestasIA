@@ -425,27 +425,26 @@ else:
     league_cfg = next(entry for entry in leagues if entry["name"] == selected_name)
     season = config.get("season", datetime.date.today().year)
 
-    if league_cfg.get("unsupported"):
-        st.warning(
-            f"'{selected_name}' no está cubierta por el tier gratis de football-data.org "
-            "todavía. Necesita otra fuente de datos (pagar API-Football u otro proveedor)."
+    source = league_cfg.get("source", "football_data")
+    if source == "espn":
+        st.sidebar.caption(
+            "⚠️ Esta liga usa una fuente no oficial (API interna de ESPN) — puede fallar sin aviso."
         )
-        predictions = []
-    else:
-        with st.spinner(f"Cargando partidos y calculando predicciones de {selected_name}..."):
-            try:
-                predictions = build_soccer_predictions(
-                    league_cfg["code"], league_cfg["name"], season, date_str
-                )
-            except FootballClientError as exc:
-                st.error(str(exc))
-                predictions = []
-            except Exception as exc:
-                st.error(f"Error al traer datos de {selected_name}: {exc}")
-                predictions = []
 
-        if not predictions:
-            st.info("No hay partidos para esa fecha/liga (o falta la API key de football-data.org).")
+    with st.spinner(f"Cargando partidos y calculando predicciones de {selected_name}..."):
+        try:
+            predictions = build_soccer_predictions(
+                league_cfg["code"], league_cfg["name"], season, date_str, source=source
+            )
+        except FootballClientError as exc:
+            st.error(str(exc))
+            predictions = []
+        except Exception as exc:
+            st.error(f"Error al traer datos de {selected_name}: {exc}")
+            predictions = []
+
+    if not predictions:
+        st.info("No hay partidos para esa fecha/liga.")
 
     render_track_record("soccer")
     render_parlays([best_pick_for_soccer(p) for p in predictions])

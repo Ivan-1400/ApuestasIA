@@ -1,12 +1,13 @@
 # Config de ligas/competencias a seguir.
-# Fuente: football-data.org (https://www.football-data.org/coverage). Se usó esta API en vez
-# de API-Football porque el tier gratis de API-Football no da acceso a la temporada actual en
-# ninguna liga (solo histórico 2022-2024) — confirmado 2026-07-19.
 #
-# El tier gratis de football-data.org cubre un set fijo de competencias, que NO incluye Liga MX
-# ni MLS. Esas dos quedan configuradas (unsupported: true) para no perder el alcance pedido
-# originalmente, pero el pipeline las salta hasta que haya una fuente de datos real para ellas
-# (pagar API-Football, u otro proveedor).
+# Dos fuentes de fútbol, elegidas por liga vía "source":
+#   - football_data: football-data.org (oficial). Cubre las 5 ligas top de Europa.
+#     Se usó en vez de API-Football porque el tier gratis de API-Football no da acceso a la
+#     temporada actual en ninguna liga (solo histórico 2022-2024) — confirmado 2026-07-19.
+#   - espn: API interna (NO oficial) que usa espn.com para sus propias páginas. Sin key, sin
+#     garantía de estabilidad. Se usa solo para Liga MX y MLS porque ninguna fuente oficial
+#     gratis las cubre con temporada actual. Si deja de funcionar, esas dos ligas vuelven a
+#     mostrar "sin datos" sin afectar al resto — ver src/data/espn_client.py.
 
 season: 2026  # temporada a consultar (ajustar según corresponda)
 
@@ -16,26 +17,31 @@ soccer:
     - code: PL
       name: "Premier League"
       country: "England"
+      source: football_data
     - code: PD
       name: "La Liga"
       country: "Spain"
+      source: football_data
     - code: SA
       name: "Serie A"
       country: "Italy"
+      source: football_data
     - code: BL1
       name: "Bundesliga"
       country: "Germany"
+      source: football_data
     - code: CL
       name: "UEFA Champions League"
       country: "World"
-    - code: null
+      source: football_data
+    - code: mex.1
       name: "Liga MX"
       country: "Mexico"
-      unsupported: true
-    - code: null
+      source: espn
+    - code: usa.1
       name: "Major League Soccer"
       country: "USA"
-      unsupported: true
+      source: espn
 
 mlb:
   enabled: true
