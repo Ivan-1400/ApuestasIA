@@ -57,13 +57,19 @@ class TeamStats(Base):
 
 
 class Prediction(Base):
+    """La pick más probable de un partido, guardada UNA sola vez (la primera vez que se vio),
+    para poder medir después si el modelo acertó sin que los recálculos posteriores la pisen."""
+
     __tablename__ = "predictions"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    fixture_id = Column(String, nullable=False)
-    market = Column(String, nullable=False)  # ej. 'total_goals', '1x2_home', 'moneyline_home'
-    value = Column(Float, nullable=True)  # valor esperado (ej. goles esperados)
-    probability = Column(Float, nullable=True)  # probabilidad del mercado, si aplica
+    fixture_id = Column(String, nullable=False, unique=True)
+    sport = Column(String, nullable=False)  # 'mlb' | 'soccer'
+    match_label = Column(String, nullable=False)
+    outcome_label = Column(String, nullable=False)
+    market = Column(String, nullable=False)  # 'home_win' | 'away_win' | 'draw' | 'over' | 'under'
+    line = Column(Float, nullable=True)
+    probability = Column(Float, nullable=False)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
 
@@ -131,9 +137,13 @@ def get_fresh_team_stats(
     return row
 
 
-def save_prediction(session: Session, prediction: Prediction) -> None:
-    session.add(prediction)
-    session.commit()
+def save_prediction_once(session: Session, prediction: Prediction) -> None:
+    """Guarda la predicción solo si todavía no hay una para ese fixture_id — no pisa la pick
+    original con recálculos de días/sesiones posteriores."""
+    existing = session.query(Prediction).filter_by(fixture_id=prediction.fixture_id).first()
+    if existing is None:
+        session.add(prediction)
+        session.commit()
 
 
 def get_fixtures_by_date(session: Session, sport: str, date: str) -> list[Fixture]:

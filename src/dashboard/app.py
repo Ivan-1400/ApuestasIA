@@ -23,7 +23,7 @@ from src.models.parlay import (
     most_likely_parlays,
     parlay_status,
 )
-from src.pipeline import build_mlb_predictions, build_soccer_predictions
+from src.pipeline import build_mlb_predictions, build_soccer_predictions, get_track_record
 
 CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "leagues.yaml"
 
@@ -276,6 +276,40 @@ PARLAY_STATUS_BADGE = {
 }
 
 
+def render_track_record(sport: str) -> None:
+    """Resumen histórico de todas las picks guardadas hasta ahora para este deporte, para
+    poder medir con el tiempo si el modelo acierta más de lo que dice el puro azar."""
+    record = get_track_record(sport)
+    if record["total"] == 0:
+        return
+
+    st.subheader("📊 Historial de aciertos")
+    decided = record["hits"] + record["misses"]
+    if decided:
+        badge_cls = "ai-result-hit" if record["hit_rate"] >= 0.5 else "ai-result-miss"
+        st.markdown(
+            f'<span class="ai-value-badge {badge_cls}">{record["hit_rate"]:.1%} de acierto</span>',
+            unsafe_allow_html=True,
+        )
+        caption = f"{record['hits']} acertadas de {decided} ya jugadas"
+        if record["pending"]:
+            caption += f" · {record['pending']} pendientes"
+        st.caption(caption)
+    else:
+        st.caption(f"{record['pending']} predicciones guardadas — todavía ninguna terminó de jugarse.")
+
+    with st.expander("Ver historial completo"):
+        for row in record["rows"]:
+            if row["hit"] is None:
+                st.write(f"⏳ **{row['outcome_label']}** ({row['match_label']}) — pendiente")
+            else:
+                icon = "✅" if row["hit"] else "❌"
+                st.write(
+                    f"{icon} **{row['outcome_label']}** ({row['match_label']}) — "
+                    f"{row['home_score']}-{row['away_score']}"
+                )
+
+
 def render_parlays(picks: list) -> None:
     """Muestra los parleys (combinadas) con mayor probabilidad de ganar, armados con la pick
     más segura de cada partido — con las stats que sustentan cada pata (carreras/goles
@@ -339,6 +373,7 @@ if sport == "MLB":
         if not predictions:
             st.info("No hay partidos de MLB para esa fecha.")
 
+        render_track_record("mlb")
         render_parlays([best_pick_for_mlb(p) for p in predictions])
 
         for p in predictions:
@@ -412,6 +447,7 @@ else:
         if not predictions:
             st.info("No hay partidos para esa fecha/liga (o falta la API key de football-data.org).")
 
+    render_track_record("soccer")
     render_parlays([best_pick_for_soccer(p) for p in predictions])
 
     for p in predictions:

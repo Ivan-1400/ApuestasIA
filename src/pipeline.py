@@ -6,6 +6,7 @@ import datetime
 
 from src.data import football_client, mlb_client, store
 from src.models import mlb_model, soccer_poisson
+from src.models.parlay import Pick, best_pick_for_mlb, best_pick_for_soccer, check_pick_hit
 
 DEFAULT_MLB_LEAGUE_AVG_RUNS = 4.3  # promedio histórico aproximado de carreras por equipo/partido
 DEFAULT_SOCCER_LEAGUE_AVG_GOALS = 1.35  # promedio histórico aproximado de ligas top europeas
@@ -108,25 +109,39 @@ def build_mlb_predictions(date: str | None = None) -> list[dict]:
                 ),
             )
 
-            results.append(
-                {
-                    "fixture_id": fixture_id,
-                    "date": date,
-                    "home_team": home["name"],
-                    "away_team": away["name"],
-                    "home_team_logo": f"https://www.mlbstatic.com/team-logos/{home['id']}.svg",
-                    "away_team_logo": f"https://www.mlbstatic.com/team-logos/{away['id']}.svg",
-                    "home_pitcher_name": home_pitcher_name,
-                    "home_pitcher_era": home_pitcher_era,
-                    "away_pitcher_name": away_pitcher_name,
-                    "away_pitcher_era": away_pitcher_era,
-                    "status": status,
-                    "is_final": status in ("Final", "Game Over"),
-                    "home_score": home_score,
-                    "away_score": away_score,
-                    **prediction,
-                }
+            result = {
+                "fixture_id": fixture_id,
+                "date": date,
+                "home_team": home["name"],
+                "away_team": away["name"],
+                "home_team_logo": f"https://www.mlbstatic.com/team-logos/{home['id']}.svg",
+                "away_team_logo": f"https://www.mlbstatic.com/team-logos/{away['id']}.svg",
+                "home_pitcher_name": home_pitcher_name,
+                "home_pitcher_era": home_pitcher_era,
+                "away_pitcher_name": away_pitcher_name,
+                "away_pitcher_era": away_pitcher_era,
+                "status": status,
+                "is_final": status in ("Final", "Game Over"),
+                "home_score": home_score,
+                "away_score": away_score,
+                **prediction,
+            }
+
+            pick = best_pick_for_mlb(result)
+            store.save_prediction_once(
+                session,
+                store.Prediction(
+                    fixture_id=fixture_id,
+                    sport="mlb",
+                    match_label=pick.match_label,
+                    outcome_label=pick.outcome_label,
+                    market=pick.market,
+                    line=pick.line,
+                    probability=pick.probability,
+                ),
             )
+
+            results.append(result)
         return results
     finally:
         session.close()
@@ -221,21 +236,94 @@ def build_soccer_predictions(
                 ),
             )
 
-            results.append(
+            result = {
+                "fixture_id": fixture_id,
+                "date": date,
+                "home_team": home["name"],
+                "away_team": away["name"],
+                "home_team_logo": home.get("crest"),
+                "away_team_logo": away.get("crest"),
+                "status": status,
+                "is_final": status == "FINISHED",
+                "home_score": home_score,
+                "away_score": away_score,
+                **prediction,
+            }
+
+            pick = best_pick_for_soccer(result)
+            store.save_prediction_once(
+                session,
+                store.Prediction(
+                    fixture_id=fixture_id,
+                    sport="soccer",
+                    match_label=pick.match_label,
+                    outcome_label=pick.outcome_label,
+                    market=pick.market,
+                    line=pick.line,
+                    probability=pick.probability,
+                ),
+            )
+
+            results.append(result)
+        return results
+    finally:
+        session.close()
+
+
+def get_track_record(sport: str | None = None) -> dict:
+    """Resumen histórico de las picks guardadas: cuántas ya se pueden verificar (el partido
+    terminó), de esas cuántas acertaron, y el % de acierto acumulado."""
+    session = store.get_session()
+    try:
+        query = session.query(store.Prediction)
+        if sport:
+            query = query.filter_by(sport=sport)
+        predictions = query.order_by(store.Prediction.created_at.desc()).all()
+
+        hits = 0
+        misses = 0
+        pending = 0
+        rows = []
+        for pred in predictions:
+            fixture = session.get(store.Fixture, pred.fixture_id)
+            decided = (
+                fixture is not None and fixture.home_score is not None and fixture.away_score is not None
+            )
+            if not decided:
+                pending += 1
+                rows.append(
+                    {
+                        "match_label": pred.match_label,
+                        "outcome_label": pred.outcome_label,
+                        "probability": pred.probability,
+                        "hit": None,
+                    }
+                )
+                continue
+
+            pick = Pick(pred.match_label, pred.outcome_label, pred.probability, pred.market, pred.line)
+            hit = check_pick_hit(pick, fixture.home_score, fixture.away_score)
+            hits += hit
+            misses += not hit
+            rows.append(
                 {
-                    "fixture_id": fixture_id,
-                    "date": date,
-                    "home_team": home["name"],
-                    "away_team": away["name"],
-                    "home_team_logo": home.get("crest"),
-                    "away_team_logo": away.get("crest"),
-                    "status": status,
-                    "is_final": status == "FINISHED",
-                    "home_score": home_score,
-                    "away_score": away_score,
-                    **prediction,
+                    "match_label": pred.match_label,
+                    "outcome_label": pred.outcome_label,
+                    "probability": pred.probability,
+                    "hit": hit,
+                    "home_score": fixture.home_score,
+                    "away_score": fixture.away_score,
                 }
             )
-        return results
+
+        decided_count = hits + misses
+        return {
+            "total": len(predictions),
+            "hits": hits,
+            "misses": misses,
+            "pending": pending,
+            "hit_rate": hits / decided_count if decided_count else None,
+            "rows": rows,
+        }
     finally:
         session.close()
