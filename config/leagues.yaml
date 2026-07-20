@@ -1,0 +1,42 @@
+# Config de ligas/competencias a seguir.
+# Fuente: football-data.org (https://www.football-data.org/coverage). Se usó esta API en vez
+# de API-Football porque el tier gratis de API-Football no da acceso a la temporada actual en
+# ninguna liga (solo histórico 2022-2024) — confirmado 2026-07-19.
+#
+# El tier gratis de football-data.org cubre un set fijo de competencias, que NO incluye Liga MX
+# ni MLS. Esas dos quedan configuradas (unsupported: true) para no perder el alcance pedido
+# originalmente, pero el pipeline las salta hasta que haya una fuente de datos real para ellas
+# (pagar API-Football, u otro proveedor).
+
+season: 2026  # temporada a consultar (ajustar según corresponda)
+
+soccer:
+  enabled: true
+  leagues:
+    - code: PL
+      name: "Premier League"
+      country: "England"
+    - code: PD
+      name: "La Liga"
+      country: "Spain"
+    - code: SA
+      name: "Serie A"
+      country: "Italy"
+    - code: BL1
+      name: "Bundesliga"
+      country: "Germany"
+    - code: CL
+      name: "UEFA Champions League"
+      country: "World"
+    - code: null
+      name: "Liga MX"
+      country: "Mexico"
+      unsupported: true
+    - code: null
+      name: "Major League Soccer"
+      country: "USA"
+      unsupported: true
+
+mlb:
+  enabled: true
+  # MLB Stats API no usa "league id" como API-Football; se consulta por fecha directamente.

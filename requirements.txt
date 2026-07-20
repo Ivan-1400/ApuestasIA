@@ -1,0 +1,9 @@
+requests
+pandas
+numpy
+scipy
+streamlit
+python-dotenv
+pyyaml
+sqlalchemy
+pytest
