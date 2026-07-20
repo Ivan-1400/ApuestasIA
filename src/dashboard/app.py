@@ -16,7 +16,12 @@ import streamlit as st
 import yaml
 
 from src.data.football_client import FootballClientError
-from src.models.parlay import best_pick_for_mlb, best_pick_for_soccer, most_likely_parlays
+from src.models.parlay import (
+    best_pick_for_mlb,
+    best_pick_for_soccer,
+    check_pick_hit,
+    most_likely_parlays,
+)
 from src.pipeline import build_mlb_predictions, build_soccer_predictions
 
 CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "leagues.yaml"
@@ -165,6 +170,8 @@ div[class*="st-key-parlay_"] {
 }
 .ai-value-positive { background: rgba(56, 161, 105, 0.18); color: #276749; }
 .ai-value-negative { background: rgba(160, 174, 192, 0.25); color: #4a5568; }
+.ai-result-hit { background: rgba(56, 161, 105, 0.18); color: #276749; }
+.ai-result-miss { background: rgba(197, 48, 48, 0.15); color: #9b2c2c; }
 .ai-callout {
     border-radius: 10px;
     padding: 0.75rem 1rem;
@@ -254,6 +261,13 @@ def render_stat_list(rows: list[tuple[str, str]]) -> str:
     return f'<div class="ai-stat-list">{rows_html}</div>'
 
 
+def render_result_badge(hit: bool, outcome_label: str) -> str:
+    cls = "ai-result-hit" if hit else "ai-result-miss"
+    icon = "✅" if hit else "❌"
+    verdict = "Acertó" if hit else "No acertó"
+    return f'<span class="ai-value-badge {cls}">{icon} {verdict} — predijo: {outcome_label}</span>'
+
+
 def render_parlays(picks: list) -> None:
     """Muestra los parleys (combinadas) con mayor probabilidad de ganar, armados con la pick
     más segura de cada partido. Requiere al menos 2 partidos para tener algo que combinar."""
@@ -341,7 +355,16 @@ if sport == "MLB":
                     away_p = p["away_pitcher_name"] or "sin anunciar"
                     away_era = f"ERA {p['away_pitcher_era']:.2f}" if p["away_pitcher_era"] is not None else "sin ERA"
                     stat_rows.append(("Pitchers abridores", f"{away_p} ({away_era}) vs {home_p} ({home_era})"))
+                if p["is_final"] and p["home_score"] is not None:
+                    stat_rows.append(
+                        ("Resultado final", f"{p['away_team']} {p['away_score']} - {p['home_score']} {p['home_team']}")
+                    )
                 st.markdown(render_stat_list(stat_rows), unsafe_allow_html=True)
+
+                if p["is_final"] and p["home_score"] is not None:
+                    pick = best_pick_for_mlb(p)
+                    hit = check_pick_hit(pick, p["home_score"], p["away_score"])
+                    st.markdown(render_result_badge(hit, pick.outcome_label), unsafe_allow_html=True)
 
 else:
     leagues = config["soccer"]["leagues"]
@@ -407,4 +430,13 @@ else:
                 ("Over 2.5 goles", f"{p['p_over_2_5']:.1%}"),
                 ("Ambos anotan", f"{p['p_btts']:.1%}"),
             ]
+            if p["is_final"] and p["home_score"] is not None:
+                stat_rows.append(
+                    ("Resultado final", f"{p['home_team']} {p['home_score']} - {p['away_score']} {p['away_team']}")
+                )
             st.markdown(render_stat_list(stat_rows), unsafe_allow_html=True)
+
+            if p["is_final"] and p["home_score"] is not None:
+                pick = best_pick_for_soccer(p)
+                hit = check_pick_hit(pick, p["home_score"], p["away_score"])
+                st.markdown(render_result_badge(hit, pick.outcome_label), unsafe_allow_html=True)

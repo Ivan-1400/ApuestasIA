@@ -88,6 +88,9 @@ def build_mlb_predictions(date: str | None = None) -> list[dict]:
             away_pitcher_name, away_pitcher_era = pitcher_info(g["teams"]["away"])
 
             fixture_id = f"mlb:{g['gamePk']}"
+            home_score = g["teams"]["home"].get("score")
+            away_score = g["teams"]["away"].get("score")
+            status = g["status"]["detailedState"]
             store.upsert_fixture(
                 session,
                 store.Fixture(
@@ -99,9 +102,9 @@ def build_mlb_predictions(date: str | None = None) -> list[dict]:
                     away_team=away["name"],
                     home_team_id=str(home["id"]),
                     away_team_id=str(away["id"]),
-                    home_score=g["teams"]["home"].get("score"),
-                    away_score=g["teams"]["away"].get("score"),
-                    status=g["status"]["detailedState"],
+                    home_score=home_score,
+                    away_score=away_score,
+                    status=status,
                 ),
             )
 
@@ -117,6 +120,10 @@ def build_mlb_predictions(date: str | None = None) -> list[dict]:
                     "home_pitcher_era": home_pitcher_era,
                     "away_pitcher_name": away_pitcher_name,
                     "away_pitcher_era": away_pitcher_era,
+                    "status": status,
+                    "is_final": status in ("Final", "Game Over"),
+                    "home_score": home_score,
+                    "away_score": away_score,
                     **prediction,
                 }
             )
@@ -194,6 +201,9 @@ def build_soccer_predictions(
 
             full_time = (f.get("score", {}) or {}).get("fullTime", {}) or {}
             fixture_id = f"soccer:{f['id']}"
+            home_score = full_time.get("home")
+            away_score = full_time.get("away")
+            status = f.get("status")
             store.upsert_fixture(
                 session,
                 store.Fixture(
@@ -205,9 +215,9 @@ def build_soccer_predictions(
                     away_team=away["name"],
                     home_team_id=str(home["id"]),
                     away_team_id=str(away["id"]),
-                    home_score=full_time.get("home"),
-                    away_score=full_time.get("away"),
-                    status=f.get("status"),
+                    home_score=home_score,
+                    away_score=away_score,
+                    status=status,
                 ),
             )
 
@@ -219,6 +229,10 @@ def build_soccer_predictions(
                     "away_team": away["name"],
                     "home_team_logo": home.get("crest"),
                     "away_team_logo": away.get("crest"),
+                    "status": status,
+                    "is_final": status == "FINISHED",
+                    "home_score": home_score,
+                    "away_score": away_score,
                     **prediction,
                 }
             )
